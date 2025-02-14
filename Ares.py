@@ -9,7 +9,7 @@ import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import PredictionErrorDisplay
+# from sklearn.metrics import PredictionErrorDisplay
 from sklearn.metrics import r2_score
 
 class Ares():
