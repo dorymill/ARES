@@ -5,11 +5,14 @@ import matplotlib.pyplot as plt
 import sklearn as sk
 import statistics
 import os
+import tensorflow as tf
+
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-# from sklearn.metrics import PredictionErrorDisplay
+from sklearn.metrics import PredictionErrorDisplay
 from sklearn.metrics import r2_score
 
 class Ares():
@@ -22,6 +25,8 @@ class Ares():
 
         # Num Features
         self.features = 11
+
+        self.VERSION = 1
 
         # Data Lists
         self.trainingDataFrames   = []
@@ -41,7 +46,9 @@ class Ares():
         self.x_scaler = StandardScaler()
         self.y_scaler = StandardScaler()
 
-        print('\n[+] ARES-1 initialized.')
+        os.system('cls')
+
+        print('\n[+] ARES-1 initialized.\n')
 
     # Load trainining data
     def load_training_sets(self, dataSets):
@@ -53,10 +60,10 @@ class Ares():
             try:
                 df = pd.read_csv(set, usecols=["%psbl","StagePoints","HF","Time","A","B","C","D","M","NPM","NS","Proc"])
                 self.trainingDataFrames.append(df)
-                print(f'\n[+] Loaded dataset: {set}')
+                print(f'[+] Loaded dataset: {set}')
                 loaded += 1
             except:
-                print(f'\n[-] Failed to load dataset: {set}')
+                print(f'[-] Failed to load dataset: {set}')
 
         print('\n[+] Aggregating and normalizing training data...')
 
@@ -88,6 +95,7 @@ class Ares():
 
         print(f'\n[+] Data aggregated ({len(self.Y_master)} points).')
 
+    # Normalize the data
     def normalize (self):
 
         # Before we rescale, we split
@@ -101,15 +109,53 @@ class Ares():
 
         print(f'\n[+] Data normalized.')
 
-    def train (self, trees):
+    # Model Training
+    def train(self, regressor, *args):
 
-        self.regressor = RandomForestRegressor(n_estimators=trees, random_state=0)
+        # Model Selection
+        if (regressor == 'support_vector'):
+            self.regressor = SVR(kernel=args[0])
+            print(f'\n\n[+] Launching {args[0]} kernel Support Vector simulation. . .')
 
-        print(f'\n[+] Launching training simulation . . .')
-        start = time.time()
+        if (regressor == 'random_forest'):
+            self.regressor = RandomForestRegressor(n_estimators=args[0], random_state=0)
+            print(f'\n\n[+] Launching Random Forest simulation with {args[0]} trees. . .')
+
+        if (regressor == 'ann'):
+            # args[0] = Hidden Layer Activation Function
+            # args[1] = Number of Hidden layers
+            # args[2] = Number of Neurons in Hidden Layers
+            # args[3] = Output Activation Function
+            # args[4] = Optimizer
+            # args[5] = Loss Function
+            # args[6] = Performance Metric
+            # args[7] = Batch Size
+            # args[8] = Epochs
+
+            self.regressor = tf.keras.models.Sequential()
+            print(f'\n\n[+] Launching Aritificial Neural Network (ARES-{self.VERSION}). . .')
+
+            # Add the first layer
+            self.regressor.add(tf.keras.layers.Dense(units=self.features, activation=args[0]))
+
+            # Iteratively add the hidden layers
+            for idx in range(0,args[1]):
+                self.regressor.add(tf.keras.layers.Dense(units=args[2], activation=args[0]))
+
+            # Output Layer
+            self.regressor.add(tf.keras.layers.Dense(units=1, activation=args[3]))
+
+            # Compile the model
+            self.regressor.compile(optimizer = args[4], loss = args[5], metrics = [args[6]])
+
         
+
         # Train the model
-        self.regressor.fit(self.X_train, self.Y_train.ravel())
+        start = time.time()
+        if regressor == 'ann':
+            self.regressor.fit(self.X_train, self.Y_train, batch_size=args[7], epochs=args[8])
+        else:
+            self.regressor.fit(self.X_train, self.Y_train.ravel())
 
         # Evaluate performance
         # Transform test input before prediction and output after
@@ -122,25 +168,40 @@ class Ares():
         errors = []
 
         g10Count = 0
+        
+        # Index to inspect large errors
+        idx = 0
 
         for y_true, y_pred in zip(self.Y_test, Y_prediction):
-            eVal = y_pred - y_true
-            if eVal >= 1.:
+            eVal = abs(y_pred - y_true).item()
+            if eVal >= 5.:
                 #print(f'\n[+] True Rank: {y_true}\tPredicted Rank: {y_pred}\tError: {y_pred - y_true}\n')
+                # print(f'\n[-] Large Error Detected on input: {self.X_test[idx,:]}')
                 g10Count += 1
 
             errors.append(float (eVal))
+            idx += 1
 
         print(f'\n[+] Training complete ({stop-start:.3f}s)')
 
-        print(f'\n[+] Coefficient of Determination: {score}')
+        print(f'\n[+] Coefficient of Determination: {score:.4f}')
 
-        print(f'\n[+] Max Error: {max(errors)}\n[+] Average Error: {statistics.mean(errors)}\n[+] Minimum Error: {min(errors)}\n[-] Errors over 1%: {g10Count} ({g10Count / len(errors):.2f}% of test set)')
+        print(f'\n[+] Max Error: {max(errors):.2f}%\n[+] Average Error: {statistics.mean(errors):.2f}%\n[-] Errors over 5%: {g10Count} ({(g10Count / len(errors))*100:.2f}% of test set)')        
 
-        # display = PredictionErrorDisplay(y_true=self.Y_test, y_pred=Y_prediction)
-        # display.plot()
+        # Plot Histogram of Error
+        q75, q25 = np.percentile(errors, [75, 25])
+        iqr = q75 - q25
+        N = len(errors)
+        binWidth = 2*(iqr) / (N)**(0.3333333)
+        bins = 2*(np.max(errors) - np.min(errors)) / binWidth
 
+        plt.hist(errors, bins=int(bins))
+        plt.xlabel('Absolute Rank Error (%)')
+        plt.ylabel('Counts')
+        plt.title(f'{regressor} Error Distribution (µ = {statistics.mean(errors):.2f}%)')
+        plt.show()
 
+        return score
 
 if __name__ == "__main__":
 
@@ -157,4 +218,21 @@ if __name__ == "__main__":
     # Load Ares' training data
     ares.load_training_sets(trainingCsvs)
 
-    ares.train(100)
+    ares.train('random_forest', 100)
+
+    ares.train('support_vector', 'rbf')
+
+
+        # args[0] = Hidden Layer Activation Function
+    # args[1] = Number of Hidden layers
+    # args[2] = Number of Neurons in Hidden Layers
+    # args[3] = Output Activation Function
+    # args[4] = Optimizer
+    # args[5] = Loss Function
+    # args[6] = Performance Metric
+    # args[7] = Batch Size
+    # args[8] = Epochs
+    ares.train('ann', 'relu', 
+               5, 100, 
+               'sigmoid', 'adam', 'binary_crossentropy', 'accuracy',
+                300, 100)
