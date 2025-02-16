@@ -20,7 +20,7 @@ MIState_2024,https://practiscore.com/results/new/253381,11
 CASec_2024,https://practiscore.com/results/new/253219,10
 WYGov_2024,https://practiscore.com/results/new/252362,12
 NYSec_2024,https://practiscore.com/results/new/251759,12
-GoldenBullet_2024,https://practiscore.com/results/new/246967,11
+GoldenBullet_2024,https://practiscore.com/results/new/246967,10
 SpaceCity_2024,https://practiscore.com/results/new/246907,12
 NHState_2024,https://practiscore.com/results/new/246065,10
 ALState_2024,https://practiscore.com/results/new/244194,9

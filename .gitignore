@@ -1,4 +1,9 @@
-/TrainingSets/lib/
-/TrainingSets/*.jar
 .vscode/launch.json
+
+/TrainingSets/Archive/
+/TrainingSets/lib/
+
+/TrainingSets/*.jar
+/TrainingSets/*.txt
+
 /Initial Results/
