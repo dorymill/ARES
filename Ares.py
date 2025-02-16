@@ -218,7 +218,7 @@ class Ares():
         plt.hist(errors, bins=int(bins))
         plt.xlabel('Absolute Rank Error (%)')
         plt.ylabel('Counts')
-        plt.title(f'{regressor} Error Distribution (µ = {statistics.mean(errors):.2f}%, σ = {statistics.stdev(errors):.2f}% , N = {len(errors)})')
+        plt.title(f'{self.regressorName} Error Distribution (µ = {statistics.mean(errors):.2f}%, σ = {statistics.stdev(errors):.2f}% , N = {len(errors)})')
         plt.show()
 
         return score
