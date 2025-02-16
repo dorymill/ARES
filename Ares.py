@@ -2,24 +2,33 @@ import time
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use('TkAgg',force=True)
-import matplotlib.pyplot as plt
-
 import sklearn as sk
 import statistics
 import os
 
+matplotlib.use('TkAgg',force=True)
+import matplotlib.pyplot as plt
+
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
+
+from sklearn.preprocessing import StandardScaler
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.svm import SVR
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import PredictionErrorDisplay
 from sklearn.metrics import r2_score
 
+from sklearn.experimental import enable_halving_search_cv 
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import HalvingGridSearchCV
+from sklearn.model_selection import HalvingRandomSearchCV
+
+from scipy.stats import loguniform
 
 class Ares():
 
@@ -30,6 +39,7 @@ class Ares():
         self.regressor = None
 
         self.regressorName = ""
+        self.regressorNameShort = ""
 
         # Num Features
         self.features = 11
@@ -71,7 +81,7 @@ class Ares():
         # Acquire all the datasets
         for set in dataSets:
             try:
-                df = pd.read_csv(set, usecols=["%psbl","StagePoints","HF","Time","A","B","C","D","M","NPM","NS","Proc"])
+                df = pd.read_csv(set, usecols=["%psbl","Points","HF","Time","A","B","C","D","M","NPM","NS","Proc"])
                 self.trainingDataFrames.append(df)
                 print(f'[+] Loaded dataset: {set}')
                 loaded += 1
@@ -122,23 +132,24 @@ class Ares():
 
         print(f'[+] Data normalized and split (N_train = {len(self.Y_train)}).')
 
-    # Model Training
-    def train(self, regressor, *args):
+    # Set the resgression model
+    def set_regressor (self, regressor, *args):
 
         # Model Selection
+        self.regressorNameShort = regressor
+
         if (regressor == 'support_vector'):
             # args[0] = Kernel Function
 
             self.regressor = SVR(kernel=args[0])
             self.regressorName = "Support Vector Regressor"
-            print(f'\n[+] Launching {args[0]} kernel Support Vector simulation. . .')
 
         if (regressor == 'random_forest'):
             # args[0] = N Trees
 
             self.regressor = RandomForestRegressor(n_estimators=args[0], random_state=0)
             self.regressorName = "Random Forest Regressor"
-            print(f'\n[+] Launching Random Forest simulation with {args[0]} trees. . .')
+            
 
         if (regressor == 'ann'):
             # args[0] = Hidden Layer Activation Function
@@ -151,31 +162,87 @@ class Ares():
             # args[7] = Batch Size
             # args[8] = Epochs
 
+            self.hiddenLayerActFnct = args[0]
+            self.hiddenLayers       = args[1]
+            self.neurons            = args[2]
+            self.outputActFnct      = args[3]
+            self.optimizer          = args[4]
+            self.lossFnct           = args[5]
+            self.performanceMetric  = args[6]
+
             self.regressor = tf.keras.models.Sequential()
             self.regressorName = "ARES-I (ANN)"
-            print(f'\n[+] Launching Aritificial Neural Network (ARES-{self.VERSION}). . .')
+            
 
             # Add the first layer
-            self.regressor.add(tf.keras.layers.Dense(units=self.features, activation=args[0]))
+            self.regressor.add(tf.keras.layers.Dense(units=self.features, activation='relu'))
 
             # Iteratively add the hidden layers
-            for idx in range(0,args[1]):
-                self.regressor.add(tf.keras.layers.Dense(units=args[2], activation=args[0]))
+            for idx in range(0,self.hiddenLayers):
+                self.regressor.add(tf.keras.layers.Dense(units=self.neurons, activation=self.hiddenLayerActFnct))
 
             # Output Layer
-            self.regressor.add(tf.keras.layers.Dense(units=1, activation=args[3]))
+            self.regressor.add(tf.keras.layers.Dense(units=1, activation=self.outputActFnct))
 
             # Compile the model
-            self.regressor.compile(optimizer = args[4], loss = args[5], metrics = [args[6]])
+            self.regressor.compile(optimizer = self.optimizer, loss = self.lossFnct, metrics = [self.performanceMetric])
 
+        return self.regressor
+
+    # Get the regressor model
+    def get_regressor(self):
+        return self.regressor
+
+    # Optimize model hyperparameters
+    def hyperparam_optimize(self, searchMethod, paramsDict):
+
+        hyperSearcher = ''
+
+        match searchMethod:
+
+            case 'GridSearchCV':
+                hyperSearcher = GridSearchCV(self.regressor,
+                                             paramsDict)
+                 
+            case 'RandSearchCV':
+                hyperSearcher = RandomizedSearchCV(self.regressor,
+                                                   paramsDict)
+                     
+            case 'HalvingGridSearchCV':
+                hyperSearcher = HalvingGridSearchCV(self.regressor,
+                                                    paramsDict)
+                
+
+            case 'HalvingRandSearchCV':
+                hyperSearcher = HalvingRandomSearchCV(self.regressor,
+                                                      paramsDict)
+
+            case _:
+                print(f'\n[-] Invalid search method passed to hyperparam optimizer.')
+                print(f'\n[-] Valid options: \'GridSearchCV\', \'RandSearchCV\', \'HalvingGridSearchCV\', \'HalvingRandSearchCV\'')
+                return
+
+        # Kick off the search
+        print(f'\n[+] Searching for best hyperparameters. . .')
+        hyperSearcher.fit(self.X_train, self.Y_train.ravel())
+
+        print(f'[+] Hyperparameter search complete for {self.regressorNameShort} using {searchMethod}.')
+        print(f'[+] Best Parameters: {hyperSearcher.best_params_}')
+        print(f'[+] Accuracy: {hyperSearcher.score(self.X_train, self.Y_train.ravel())}')
+
+        return hyperSearcher.best_params_
         
+    # Model Training
+    def train(self, *args):
 
         # Train the model
         start = time.time()
-        if regressor == 'ann':
-            self.regressor.fit(self.X_train, self.Y_train, batch_size=args[7], epochs=args[8], verbose=self.annVerbosity)
+        if self.regressorNameShort == 'ann':
+            print(f'\n[+] Training Aritificial Neural Network (ARES-{self.VERSION}). . .')
+            self.regressor.fit(self.X_train, self.Y_train, batch_size=args[0], epochs=args[1], verbose=self.annVerbosity)
         else:
             self.regressor.fit(self.X_train, self.Y_train.ravel())
+            print(f'\n[+] Training {self.regressorNameShort}. . .')
 
         # Evaluate performance
         # Transform test input before prediction and output after
@@ -238,27 +305,45 @@ if __name__ == "__main__":
     # Load Ares' training data
     ares.load_training_sets(trainingCsvs)
 
-    ares.train('random_forest', 500)
+    # Random Forest
+    ares.set_regressor('random_forest', 1000)
+    best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
+                              {
+                                 'n_estimators'   : [10, 50, 100, 500, 1000],
+                                 'max_features'   : ['sqrt', 'log2', None ],
+                                 'max_depth'      : [None, 1, 11, 20, 50],
+                                 'max_leaf_nodes' : [None, 2, 10, 100],
+                              })
+    # ares.train()
 
-    ares.train('support_vector', 'rbf')
+    ares.set_regressor('support_vector', 'rbf')
+    best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
+                            {
+                                'C'      : loguniform(1e0, 1e3),
+                                'gamma'  : loguniform(1e0, 1e-4),
+                                'kernel' : ['rbf', 'linear'],
+                            })
+    # ares.train()
 
-    # To-Do: Add more complex hidden layer structure, e.g. growing and shrinking layer counts
+    # # To-Do: Add more complex hidden layer structure, e.g. growing and shrinking layer counts
 
-    hiddenLayers = 300
-    hlNeurons    = 30
-    epochs       = 500
-    batchSize    = 500
+    # hiddenLayers = 300
+    # hlNeurons    = 30
+    # epochs       = 500
+    # batchSize    = 500
     
-    hiddenLayerActFnct = 'relu'
-    optimizer          = 'adam'
-    outputActFnct      = 'sigmoid'
-    lossFnct           = 'mse'
-    performanceMetric  = 'accuracy'
+    # hiddenLayerActFnct = 'relu'
+    # optimizer          = 'adam'
+    # outputActFnct      = 'sigmoid'
+    # lossFnct           = 'mse'
+    # performanceMetric  = 'accuracy'
 
-    ares.annVerbosity = 0
+    # ares.annVerbosity = 0
 
-    ares.train('ann', hiddenLayerActFnct, 
-                      hiddenLayers, hlNeurons, 
-                      outputActFnct, optimizer, 
-                      lossFnct, performanceMetric,
-                      batchSize, epochs)
+    # ares.set_regressor('ann', hiddenLayerActFnct, 
+    #                   hiddenLayers, hlNeurons, 
+    #                   outputActFnct, optimizer, 
+    #                   lossFnct, performanceMetric,
+    #                   batchSize, epochs)
+    
+    # ares.train(batchSize, epochs)

@@ -1,4 +1,4 @@
-.vscode/launch.json
+/.vscode/
 
 /TrainingSets/Archive/
 /TrainingSets/lib/
@@ -7,3 +7,5 @@
 /TrainingSets/*.txt
 
 /Initial Results/
+
+/__pycache__/
