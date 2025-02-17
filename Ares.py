@@ -9,6 +9,11 @@ import os
 matplotlib.use('TkAgg',force=True)
 import matplotlib.pyplot as plt
 
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.warn = warn
+
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
@@ -42,7 +47,7 @@ class Ares():
         self.regressorNameShort = ""
 
         # Num Features
-        self.features = 11
+        self.features = 12
 
         self.testSplitFrac = 0.25
 
@@ -144,14 +149,13 @@ class Ares():
             self.regressor = SVR(kernel=args[0])
             self.regressorName = "Support Vector Regressor"
 
-        if (regressor == 'random_forest'):
+        elif (regressor == 'random_forest'):
             # args[0] = N Trees
 
             self.regressor = RandomForestRegressor(n_estimators=args[0], random_state=0)
             self.regressorName = "Random Forest Regressor"
-            
 
-        if (regressor == 'ann'):
+        elif (regressor == 'ann'):
             # args[0] = Hidden Layer Activation Function
             # args[1] = Number of Hidden layers
             # args[2] = Number of Neurons in Hidden Layers
@@ -173,7 +177,6 @@ class Ares():
             self.regressor = tf.keras.models.Sequential()
             self.regressorName = "ARES-I (ANN)"
             
-
             # Add the first layer
             self.regressor.add(tf.keras.layers.Dense(units=self.features, activation='relu'))
 
@@ -186,12 +189,13 @@ class Ares():
 
             # Compile the model
             self.regressor.compile(optimizer = self.optimizer, loss = self.lossFnct, metrics = [self.performanceMetric])
+        
+        else:
+            print(f'\n[-] Invalid regressor passed.')
+            print(f'[-] Valid regressors: \'support_vector\', \'random_forest\', \'ann\'')
+            exit()
 
-        return self.regressor
-
-    # Get the regressor model
-    def get_regressor(self):
-        return self.regressor
+        print(f'\n[+] Regressor set to {self.regressorName}')
 
     # Optimize model hyperparameters
     def hyperparam_optimize(self, searchMethod, paramsDict):
@@ -220,7 +224,7 @@ class Ares():
             case _:
                 print(f'\n[-] Invalid search method passed to hyperparam optimizer.')
                 print(f'\n[-] Valid options: \'GridSearchCV\', \'RandSearchCV\', \'HalvingGridSearchCV\', \'HalvingRandSearchCV\'')
-                return
+                exit()
 
         # Kick off the search
         print(f'\n[+] Searching for best hyperparameters. . .')
@@ -311,16 +315,16 @@ if __name__ == "__main__":
                               {
                                  'n_estimators'   : [10, 50, 100, 500, 1000],
                                  'max_features'   : ['sqrt', 'log2', None ],
-                                 'max_depth'      : [None, 1, 11, 20, 50],
-                                 'max_leaf_nodes' : [None, 2, 10, 100],
+                                 'max_depth'      : [None, 1, 12, 24, 50],
+                                 'max_leaf_nodes' : [None, 2, 10, 12, 24, 50],
                               })
     # ares.train()
 
     ares.set_regressor('support_vector', 'rbf')
     best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
                             {
-                                'C'      : loguniform(1e0, 1e3),
-                                'gamma'  : loguniform(1e0, 1e-4),
+                                'C'      : [1, 10, 100, 1000],            #loguniform(1e0, 1e3)
+                                'gamma'  : [1, 0.1, 0.01, 0.001, 0.0001], #loguniform(1e0, 1e-4),
                                 'kernel' : ['rbf', 'linear'],
                             })
     # ares.train()
