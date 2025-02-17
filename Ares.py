@@ -1,3 +1,4 @@
+import datetime
 import time
 import numpy as np
 import pandas as pd
@@ -18,6 +19,10 @@ warnings.warn = warn
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 
+from scipy.stats import loguniform
+
+from tensorboard.plugins.hparams import api as hp
+
 from sklearn.preprocessing import StandardScaler
 
 from sklearn.ensemble import RandomForestRegressor
@@ -33,7 +38,6 @@ from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import HalvingGridSearchCV
 from sklearn.model_selection import HalvingRandomSearchCV
 
-from scipy.stats import loguniform
 
 class Ares():
 
@@ -220,21 +224,99 @@ class Ares():
             case 'HalvingRandSearchCV':
                 hyperSearcher = HalvingRandomSearchCV(self.regressor,
                                                       paramsDict)
-
+                
             case _:
                 print(f'\n[-] Invalid search method passed to hyperparam optimizer.')
                 print(f'\n[-] Valid options: \'GridSearchCV\', \'RandSearchCV\', \'HalvingGridSearchCV\', \'HalvingRandSearchCV\'')
                 exit()
 
-        # Kick off the search
-        print(f'\n[+] Searching for best hyperparameters. . .')
+        # Kick off the search with the TensorBoard callback
+        print(f'[+] Searching for best hyperparameters. . .')
         hyperSearcher.fit(self.X_train, self.Y_train.ravel())
 
         print(f'[+] Hyperparameter search complete for {self.regressorNameShort} using {searchMethod}.')
         print(f'[+] Best Parameters: {hyperSearcher.best_params_}')
-        print(f'[+] Accuracy: {hyperSearcher.score(self.X_train, self.Y_train.ravel())}')
+        print(f'[+] Accuracy: {hyperSearcher.score(self.X_train, self.Y_train.ravel()):.3f}')
 
         return hyperSearcher.best_params_
+
+    # Optimize ANN hyperparameters
+    def ann_hyperparam_optimize(self, hparams):
+        
+        HP_HDN = hp.HParam('hiddenLayers', hp.Discrete(hparams['hiddenLayers']))
+        HP_NRN = hp.HParam('neurons', hp.Discrete(hparams['neurons']))
+        HP_ACT = hp.HParam('activation', hp.Discrete(hparams['activation']))
+        HP_OPT = hp.HParam('optimizer', hp.Discrete(hparams['optimizer']))
+        HP_LSS = hp.HParam('loss', hp.Discrete(hparams['loss']))
+        HP_MET = hp.HParam('metrics', hp.Discrete(hparams['metrics']))
+        HP_BTC = hp.HParam('batch', hp.Discrete(hparams['batch']))
+        HP_EPC = hp.HParam('epochs', hp.Discrete(hparams['epochs']))
+
+        with tf.summary.create_file_writer('logs/').as_default():
+            hp.hparams_config(
+                hparams=[HP_HDN, HP_NRN, HP_ACT, HP_OPT, HP_LSS, HP_MET, HP_BTC, HP_EPC],
+                metrics=[hp.Metric('mse', display_name='Accuracy')],
+            )
+
+        def train_model(hparams):
+        
+            # Instantiate model
+            model = tf.keras.models.Sequential()
+
+            # First Layer
+            model.add(tf.keras.layers.Dense(units=self.features, activation='relu'))
+
+            # Hidden Layers
+            for i in range(0, hparams[HP_HDN]):
+                model.add(tf.keras.layers.Dense(units=hparams[HP_NRN], activation=hparams[HP_ACT]))
+
+            # Output layer
+            model.add(tf.keras.layers.Dense(units=1, activation='sigmoid'))
+        
+            # Compile with loss function and optimizer
+            model.compile(optimizer=hparams[HP_OPT], loss=hparams[HP_LSS], metrics=[hparams[HP_MET]])
+        
+            # Fit the data
+            model.fit(self.X_train, self.Y_train, batch_size=hparams[HP_BTC], epochs=hparams[HP_EPC], verbose=self.annVerbosity)
+        
+            Y_prediction = self.y_scaler.inverse_transform(np.reshape(model.predict(self.x_scaler.transform(self.X_test)),(-1,1)))
+
+            score = r2_score(self.Y_test, Y_prediction, multioutput='variance_weighted')
+
+            return score
+        
+        def run(dir, hparams):
+            with tf.summary.create_file_writer(dir).as_default():
+                hp.hparams(hparams)
+                accuracy = train_model(hparams)
+                tf.summary.scalar('accuracy', accuracy, step=1)
+        
+        # Iterate over all hyperparameters
+        print(f'[+] Searching for best hyperparameters. . .')
+        run_num = 0
+        for hLayers in hparams['hiddenLayers']:
+            for neurons in hparams['neurons']:
+                for activation in hparams['activation']:
+                    for optimizer in hparams['optimizer']:
+                        for loss in hparams['loss']:
+                            for metric in hparams['metrics']:
+                                for batch in hparams['batch']:
+                                    for epochs in hparams['epochs']:
+                                        run_name = f'run_{run_num}'
+
+                                        params = {
+                                            HP_HDN : hLayers,
+                                            HP_NRN : neurons,
+                                            HP_ACT : activation,
+                                            HP_OPT : optimizer,
+                                            HP_LSS : loss,
+                                            HP_MET : metric,
+                                            HP_BTC : batch,
+                                            HP_EPC : epochs
+                                        }
+
+                                        run('logs/' + run_name, params)
+                                        run_num += 1
         
     # Model Training
     def train(self, *args):
@@ -243,7 +325,7 @@ class Ares():
         start = time.time()
         if self.regressorNameShort == 'ann':
             print(f'\n[+] Training Aritificial Neural Network (ARES-{self.VERSION}). . .')
-            self.regressor.fit(self.X_train, self.Y_train, batch_size=args[0], epochs=args[1], verbose=self.annVerbosity)
+            self.regressor.fit(self.X_train, self.Y_train.ravel(), batch_size=args[0], epochs=args[1], verbose=self.annVerbosity)
         else:
             self.regressor.fit(self.X_train, self.Y_train.ravel())
             print(f'\n[+] Training {self.regressorNameShort}. . .')
@@ -310,26 +392,44 @@ if __name__ == "__main__":
     ares.load_training_sets(trainingCsvs)
 
     # Random Forest
-    ares.set_regressor('random_forest', 1000)
-    best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
-                              {
-                                 'n_estimators'   : [10, 50, 100, 500, 1000],
-                                 'max_features'   : ['sqrt', 'log2', None ],
-                                 'max_depth'      : [None, 1, 12, 24, 50],
-                                 'max_leaf_nodes' : [None, 2, 10, 12, 24, 50],
-                              })
+    # ares.set_regressor('random_forest', 1000)
+    # best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
+    #                           {
+    #                              'n_estimators'   : [10, 50, 100, 500, 1000],
+    #                              'max_features'   : ['sqrt', 'log2', None ],
+    #                              'max_depth'      : [None, 1, 12, 24, 50],
+    #                              'max_leaf_nodes' : [None, 2, 10, 12, 24, 50],
+    #                           })
+    # # ares.train()
+
+    # Support Vector
+    # ares.set_regressor('support_vector', 'rbf')
+    # best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
+    #                         {
+    #                             'C'      : [1, 10, 100, 1000],            #loguniform(1e0, 1e3)
+    #                             'gamma'  : [1, 0.1, 0.01, 0.001, 0.0001], #loguniform(1e0, 1e-4),
+    #                             'kernel' : ['rbf', 'linear'],
+    #                         })
     # ares.train()
 
-    ares.set_regressor('support_vector', 'rbf')
-    best_params = ares.hyperparam_optimize('HalvingRandSearchCV',
-                            {
-                                'C'      : [1, 10, 100, 1000],            #loguniform(1e0, 1e3)
-                                'gamma'  : [1, 0.1, 0.01, 0.001, 0.0001], #loguniform(1e0, 1e-4),
-                                'kernel' : ['rbf', 'linear'],
-                            })
-    # ares.train()
 
+
+    # Artificial Neural Network
     # # To-Do: Add more complex hidden layer structure, e.g. growing and shrinking layer counts
+
+    hparams = {
+        'hiddenLayers' : [1, 5, 10, 12, 24, 100, 500, 1000],
+        'neurons'      : [6, 12, 20, 24, 50, 100, 1000],
+        'activation'   : ['relu', 'exponential', 'gelu', 'linear', 'selu', 'softmax', 'softplus', 'tanh'],
+        'optimizer'    : ['adam', 'sgd', 'rmsprop'],
+        'loss'         : ['mse', 'mape'],
+        'metrics'      : ['mse'],
+        'batch'        : [10, 50, 100, 500, 1000, 2000],
+        'epochs'       : [50, 100]
+    }
+
+    ares.ann_hyperparam_optimize(hparams)
+
 
     # hiddenLayers = 300
     # hlNeurons    = 30
